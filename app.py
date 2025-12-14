@@ -163,33 +163,36 @@ def render_agent_status(name, status):
 with st.sidebar:
     st.markdown("### ⚙️ Control Panel")
     company_input = st.text_input("Enter Company Name", value="", key="ticker_input")
-    run_btn = st.button("Generate Analysis ↗", type="primary", use_container_width=True)
+    run_btn =st.button("Generate Analysis ↗", type="primary", width="stretch")
 
     st.markdown("---")
     st.markdown("**Agent Status**")
 
-    p_news = st.empty()
+    p_resolve = st.empty()
     p_fin = st.empty()
     p_market = st.empty()
-    p_writer = st.empty()
-
+    p_news = st.empty()
+    p_details = st.empty()
+    p_analyst = st.empty()
     # LOGIC: If we already have data, show all as DONE (Green)
     # Otherwise, show them as IDLE (Grey)
     initial_status = "done" if 'data' in st.session_state else "idle"
 
-    p_news.markdown(render_agent_status("News Agent", initial_status), unsafe_allow_html=True)
+    p_resolve.markdown(render_agent_status("Ticker Resolver", initial_status), unsafe_allow_html=True)
     p_fin.markdown(render_agent_status("Financials Agent", initial_status), unsafe_allow_html=True)
-    p_market.markdown(render_agent_status("Market Data", initial_status), unsafe_allow_html=True)
-    p_writer.markdown(render_agent_status("Head Analyst", initial_status), unsafe_allow_html=True)
-
+    p_market.markdown(render_agent_status("Market Data Agent", initial_status), unsafe_allow_html=True)
+    p_news.markdown(render_agent_status("News Agent", initial_status), unsafe_allow_html=True)
+    p_details.markdown(render_agent_status("Company Details", initial_status), unsafe_allow_html=True)
+    p_analyst.markdown(render_agent_status("Master Analyst", initial_status), unsafe_allow_html=True)
 # 5. EXECUTION LOGIC
 if run_btn:
     # Reset UI to running state
-    p_news.markdown(render_agent_status("News Agent", "running"), unsafe_allow_html=True)
-    p_fin.markdown(render_agent_status("Financials Agent", "running"), unsafe_allow_html=True)
-    p_market.markdown(render_agent_status("Market Data", "running"), unsafe_allow_html=True)
-    p_writer.markdown(render_agent_status("Head Analyst", "idle"), unsafe_allow_html=True)
-
+    p_resolve.markdown(render_agent_status("Ticker Resolver", "running"), unsafe_allow_html=True)
+    p_fin.markdown(render_agent_status("Financials Agent", "idle"), unsafe_allow_html=True)
+    p_market.markdown(render_agent_status("Market Data Agent", "idle"), unsafe_allow_html=True)
+    p_news.markdown(render_agent_status("News Agent", "idle"), unsafe_allow_html=True)
+    p_details.markdown(render_agent_status("Company Details", "idle"), unsafe_allow_html=True)
+    p_analyst.markdown(render_agent_status("Master Analyst", "idle"), unsafe_allow_html=True)
     final_state = {}
 
     try:
@@ -203,19 +206,28 @@ if run_btn:
                     final_state.update(agent_data)
 
                     # Update Indicators dynamically
-                    if agent_name == "financials_agent":
+                    if agent_name == "ticker_resolver":
+                        p_resolve.markdown(render_agent_status("Ticker Resolver", "done"), unsafe_allow_html=True)
+                        p_fin.markdown(render_agent_status("Financials Agent", "running"), unsafe_allow_html=True)
+
+                    elif agent_name == "financials_agent":
                         p_fin.markdown(render_agent_status("Financials Agent", "done"), unsafe_allow_html=True)
-                    elif agent_name == "news_agent":
-                    # 1. Mark News Agent as Done
-                        p_news.markdown(render_agent_status("News Agent", "done"), unsafe_allow_html=True)
+                        p_market.markdown(render_agent_status("Market Data Agent", "running"), unsafe_allow_html=True)
 
-                        # 2. IMMEDIATELY set Head Analyst to Running (Orange)
-                        p_writer.markdown(render_agent_status("Head Analyst", "running"), unsafe_allow_html=True)
                     elif agent_name == "market_data_agent":
-                        p_market.markdown(render_agent_status("Market Data", "done"), unsafe_allow_html=True)
-                    elif agent_name == "master_analyst":
-                        p_writer.markdown(render_agent_status("Head Analyst", "done"), unsafe_allow_html=True)
+                        p_market.markdown(render_agent_status("Market Data Agent", "done"), unsafe_allow_html=True)
+                        p_news.markdown(render_agent_status("News Agent", "running"), unsafe_allow_html=True)
 
+                    elif agent_name == "news_agent":
+                        p_news.markdown(render_agent_status("News Agent", "done"), unsafe_allow_html=True)
+                        p_details.markdown(render_agent_status("Company Details", "running"), unsafe_allow_html=True)
+
+                    elif agent_name == "company_details_agent":
+                        p_details.markdown(render_agent_status("Company Details", "done"), unsafe_allow_html=True)
+                        p_analyst.markdown(render_agent_status("Master Analyst", "running"), unsafe_allow_html=True)
+
+                    elif agent_name == "master_analyst":
+                        p_analyst.markdown(render_agent_status("Master Analyst", "done"), unsafe_allow_html=True)
         # Save to session state
         if final_state:
             st.session_state['data'] = final_state
@@ -223,7 +235,7 @@ if run_btn:
 
     except Exception as e:
         st.error(f"Error: {str(e)}")
-        p_writer.markdown(render_agent_status("Head Analyst", "error"), unsafe_allow_html=True)
+        p_analyst.markdown(render_agent_status("Master Analyst", "error"), unsafe_allow_html=True)
         st.stop()
 
 # 6. MAIN CONTENT RENDERING

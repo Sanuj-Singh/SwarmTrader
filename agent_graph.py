@@ -3,6 +3,7 @@ import json
 import re
 import streamlit as st
 import operator
+import datetime
 from yahooquery import Ticker
 from typing import TypedDict, List, Annotated
 from langchain_core.messages import HumanMessage
@@ -35,6 +36,7 @@ class AgentState(TypedDict):
     financial_data: dict
     market_data: dict
     news_data: dict
+    company_details: dict
     final_report: dict
     messages: Annotated[List[str], operator.add]
 
@@ -95,16 +97,17 @@ def lookup_ticker(company_name: str):
 
 #function to fetch fundamentals using google search 
 
-def fetch_fundamentals(ticker: str):
+def fetch_fundamentals(company_name:str,ticker: str):
     """
     (Financial Agent Tool) USES GOOGLE SEARCH instead of APIs.
     Bypasses network blocks by reading text from the web.
     """
     print(f"--- [Financials] Searching Google for {ticker} data ---")
 
-    query = f"{ticker} stock share price market cap P/E ratio revenue net income beta dividend yield 52 week high low volume"
+    query = f"{company_name} stock share price, market cap, P/E ratio, revenue, net income, beta, dividend yield, 52 week high,52 week low, volume"
     try:
         search_results = search_tool.run(query)
+        print(f"{search_results}")
     except Exception as e:
         print(f"Search failed: {e}")
         search_results = "No search results found."
@@ -131,56 +134,99 @@ def fetch_fundamentals(ticker: str):
         }
     ]
 
-    prompt = f"""
-    You are a Global Financial Data Analyst.
+    prompt =f"""
 
-    ### REFERENCE: REGIONAL NUMBER SYSTEMS
-    Use these rules if the source text uses regional terms (e.g., "50 Crore"):
-    {global_number_systems}
+You are a Senior Global Financial Data Analyst.
+Your goal is to extract current financial fundamentals for the specific company identified by Ticker: {ticker}.
 
-    ### SOURCE DATA (From Search):
-    {search_results}
+### 1. INPUT DATA
+**Reference - Regional Number Systems:**
+{global_number_systems}
 
-    ### YOUR TASK:
-    Extract financial metrics for the company.
-    ###  MATH & LOGIC RULES TO FOLLOW :
-    1.  **Reliance Industries Check:** The current Market Cap is approx **₹21 Lakh Crore** (INR).
-        * *Wrong Math:* 21 Lakh Crore = $21 Trillion USD ( FALSE - This is > US GDP)
-        * *Correct Math:* (21 * 10^5 * 10^7) / 84 INR_Rate ≈ **$250 Billion USD** (CORRECT)
-    2.  **Date Check:** Prioritize data from **2024-2025**. Ignore "2022" data unless it's the only option.
-    3.  **Currency Conversion:**
-        * **INR/JPY/KRW:** Divide by Exchange Rate (e.g., Value / 84).
-        * **EUR/GBP:** Multiply by Exchange Rate (e.g., Value * 1.10).
+**Source Text (Search Results):**
+{search_results}
 
-    ### EXECUTION STEPS:
-    1.  **Extract Raw Native Value:** (e.g., "21,04,299 Crore INR").
-    2.  **Convert to Full Integer:** (21,04,299 * 10,000,000 = 21,042,990,000,000).
-    3.  **Apply Exchange Rate:** (21,042,990,000,000 / 84.5 = 249,029,467,455).
-    4.  **Format:** "249.03B".
+---
 
-    ### REQUIRED OUTPUT (JSON):
-    {{
-        "meta": {{
-            "detected_currency": "e.g. INR",
-            "exchange_rate_used": "e.g. 84.5",
-            "math_scratchpad": "e.g. 21.04 Lakh Crore / 84.5 = 249B USD"  <-- CRITICAL: WRITE YOUR MATH HERE
-        }},
-        "metrics": {{
-            "Market Cap": "Value in USD (e.g. 249.03B)",
-            "Revenue TTM": "Value in USD",
-            "Net Income": "Value in USD",
-            "Beta": "Value",
-            "PE Ratio": "Value",
-            "EPS TTM": "Value in USD",
-            "Dividend": "Value %",
-            "52W High": "Value (Native)",
-            "52W Low": "Value (Native)",
-            "Volume": "Value in M",
-            "Shares Out": "Value"
-        }}
-    }}
-    """
+### 2. CRITICAL EXECUTION PROTOCOLS
 
+**Protocol A: Entity Disambiguation (The "Who" Filter)**
+1.  **Strict Matching:** You must ONLY extract data for the company matching {ticker}.
+2.  **Competitor Trap:** The source text may list competitors (e.g., comparing TCS to Infosys). IGNORE metrics belonging to other companies.
+3.  **Ticker Verification:** If the ticker ends in `.NS` or `.BO`, it is an Indian entity. If `.L`, it is UK. If `.T`, it is Japanese. Adjust currency logic accordingly.
+
+**Protocol B: The "Lakh-Crore" Math Trap (The "How" Filter)**
+*Common LLM Error:* Confusing "Lakh Crore" with "Trillions".
+* **Rule:** 1 Lakh Crore INR != 1 Trillion USD.
+* **Math:** 1 Lakh Crore = 1,00,000,00,00,000 (10^12) INR = 100 Billion INR.
+* **Conversion:** (Value in Lakh Crore * 10^12) / Exchange Rate or directly (Value in Lakh Crore * 100 Billion) / Exchange Rate
+* **Sanity Check:** No Indian company exceeds $300B USD (approx). No Global company exceeds $4T USD. If your calculation exceeds these limits, YOUR MATH IS WRONG. Recalculate.
+
+**Protocol C: Currency Normalization**
+1.  **Detect Currency:** Look for symbols (₹, $, €, £, ¥, KRW, GBX).
+2.  **Date Prioritization:** Prioritize 2024-2025 (TTM) data. Ignore data older than 2023.
+3.  **Conversion Logic:**
+    * **Weak Currencies (INR, JPY, KRW):** DIVIDE by rate (e.g., INR/84, JPY/150).
+    * **Strong Currencies (GBP, EUR):** MULTIPLY by rate (e.g., GBP*1.27).
+    * **UK Specific:** If priced in Pence (GBX), divide by 100 to get GBP, then convert to USD.
+    * **Market Cap Normalization:** ALWAYS convert Market Cap to USD regardless of source currency for fair global comparison.
+
+**Protocol D: Number Format Understanding**
+* Indian System: 1 Lakh = 100,000; 1 Crore = 10,000,000; 1 Lakh Crore = 1,00,000,00,00,000
+* International: 1 Million = 1,000,000; 1 Billion = 1,000,000,000; 1 Trillion = 1,000,000,000,000
+* Conversion: 1 Lakh Crore INR = 100 Billion INR
+
+**Protocol E: Global Market Consistency**
+1. Market Cap should always be presented in USD for global comparison
+2. Revenue and Income figures should be converted to USD
+3. 52W High/Low should remain in native currency
+4. Always include USD conversion for global market cap ranking
+
+---
+
+### 3. EXTRACTION STEPS (Chain of Thought)
+Perform these steps internally before generating JSON:
+1.  **Identify** the specific company name associated with {ticker}.
+2.  **Extract** raw strings (e.g., "21.5 Lakh Cr", "450 Billion Yen", "€12.3 Billion").
+3.  **Normalize** to standard numerical format (e.g., 2,150,000,000,000 for Lakh Crore).
+4.  **Convert** to USD using current approximate rates:
+    * INR: ~84
+    * JPY: ~150
+    * GBP: ~1.27
+    * EUR: ~1.10
+    * KRW: ~1,330
+    * Adjust as necessary for precision
+5.  **Format** output (B = Billion, M = Million) with exactly 2 decimal places.
+
+---
+
+### 4. REQUIRED OUTPUT (Strict JSON)
+Return ONLY this JSON object. If a specific metric is not found or ambiguous, set it to "N/A".
+ALL monetary values EXCEPT 52W High and 52W Low should be converted to USD for global market comparison.
+
+{{
+  "meta": {{
+    "target_company": "Name of company identified",
+    "detected_currency": "Original currency symbol (e.g. INR, JPY, USD)",
+    "exchange_rate_used": "Exchange rate applied for conversion to USD (e.g. 84.5)",
+    "market_cap_usd": "Market cap converted to USD for global comparison",
+    "math_scratchpad": "SHOW YOUR WORK. Ex: (21 Lakh Crore * 100 Billion) / 84 = $250B"
+  }},
+  "metrics": {{
+    "Market Cap": "Value in USD ONLY (e.g. 249.03B) for global market comparison",
+    "Revenue TTM": "Value in USD (e.g. 12.5B)",
+    "Net Income": "Value in USD",
+    "Beta": "Float value",
+    "PE Ratio": "Float value",
+    "EPS TTM": "Value in USD",
+    "Dividend Yield": "Percentage %",
+    "52W High": "Value in NATIVE currency (NOT converted to USD)",
+    "52W Low": "Value in NATIVE currency (NOT converted to USD)",
+    "Volume": "Value in M (Millions)",
+    "Shares Outstanding": "Value in B or M"
+  }}
+}}
+"""
 
     try:
         response = llm.invoke(prompt)
@@ -242,60 +288,124 @@ def get_stock_price(ticker: str):
         print(f"   [Error] YahooQuery Price failed: {e}")
         return {"error": str(e)}
 
-def get_company_news(company_name: str, ticker: str):
+def get_company_news(ticker: str):
+    Yticker=Ticker(ticker)
+    
+    try:
+        raw_news=Yticker.news(count=15)
+#            query= f"{company_name} latest earnings results guidance downgrade upgrade ,regulatory action lawsuit investigation merger acquisition leadership change,financial scandal controversy analyst ratings major partnership stock forecast impact and latest news"
+ #           raw_results = search_tool.run(query)
+        news_list = []
 
-        try:
-            query= f"{company_name} who is the current CEO, when was it founded, which industry and sector. latest earnings results guidance downgrade upgrade ,regulatory action lawsuit investigation merger acquisition leadership change,financial scandal controversy analyst ratings major partnership stock forecast impact and latest news"
-            raw_results = search_tool.run(query)
-            prompt = f"""Extract the following details for {company_name} from the search results below.who is the current CEO, when was it founded, which industry and sector.If a field is missing, use "N/A".
+        if isinstance( raw_news,dict):
+            news_list = raw_news.get(ticker, [])
+            if not news_list:
+                # If the dict has values, take the first value found (robustness for single ticker queries)
+                values = list(raw_news.values())
+                if values and isinstance(values[0], list):
+                    news_list = values[0]
+        elif isinstance(raw_news, list):
+            news_list = raw_news
+        if not isinstance(news_list, list):
+            news_list = []
+        news_context=""
+        if news_list:
+            for item in news_list:
+                if not isinstance(item, dict):
+                    continue
+                title = item.get("title", "")
+                summary = item.get("summary","")[:500]  # Limit summary length
+                published_time = item.get("providerPublishTime", "")
+                pub_date=""
+                if published_time:
+                    try:
+                        pub_date = datetime.datetime.fromtimestamp(published_time).strftime('%Y-%m-%d')
+                    except:
+                        pub_date="Recent"
+                news_context +=f"- [{pub_date}]::: {title}\n {summary}\n"
+        else:
+            news_context="No recent news found."
+        prompt = f"""Analyze the following data for ({ticker}):
 
-                SEARCH RESULTS:
-                {raw_results}
+        RECENT NEWS HEADLINES:
+        {news_context}
 
-                Extract these specific details and return valid JSON only:
+        Task:
+        Summarize ONLY market-moving events:
+        - Earnings & guidance
+        - Analyst upgrades/downgrades
+        - M&A
+        - Regulatory, lawsuits, investigations
+        - Leadership changes
+        Return STRICT JSON ONLY. No markdown, no extra text:{{
+        "News": {{
+            "news_summary": "Your summary here...",
+            "impact_level": "HIGH | MEDIUM | LOW"
+            
+            }}
+        }}
+        """
 
-               "News": {{
-
-                    "news_summary": "summary of latest news"
-                }}
-
-                """
-
-            response = llm.invoke(prompt)
+        response = llm.invoke(prompt)
 
             # Clean JSON
-            clean_news_json = response.content.replace("```json", "").replace("```", "").strip()
-            news_data = json.loads(clean_news_json)
-            news_output=news_data.get("News",{})
+        clean_news_json = response.content.replace("```json", "").replace("```", "").strip()
+        news_data = json.loads(clean_news_json)
+        news_output=news_data.get("News",news_data)
             
-            return {
+        return {
                 "News":news_output,
-                
-                    }
-        except Exception as e:
+                 }
+    except Exception as e:
             print(f"Error fetching news: {e}")
-            return "new Error"
-
+            return {
+            "News": {
+                "news_summary": f"Could not fetch news due to error: {str(e)}"
+            }
+        }
 
 #function to get company details like CEO founded industry sector
-def get_company_details(ticker: str):
+def get_company_details(company_name: str,ticker: str):
     print(f"--- [Company Details] Fetching details for {ticker} ---")
+    companyquery=f"{company_name} CEO, founded, year, industry, and sector"
     try:
-        ticker = yf.Ticker(ticker)
-        info = ticker.info
+        management_results = search_tool.run(companyquery)
+        print(f"{management_results}")
+    except Exception as e:
+        print(f"Search failed: {e}")
+    prompt = f"""
+        ### SOURCE DATA (From Search):
+    {management_results}
+    Extract the following company details from the text below:
+    1. CEO Name
+    2. Year Founded
+    3. Industry
+    4. Sector
+    Return STRICT JSON ONLY. No markdown, no extra text.
+    {{"company_details":{{
+        "CEO": "Name of CEO",
+        "founded": "Year Founded",
+        "industry": "Industry Name",
+        "sector": "Sector Name"
+    }}
+    }}
+
+    """
+    try:
+        response = llm.invoke(prompt)
+
+        # Clean JSON
+        clean_json = response.content.replace("```json", "").replace("```", "").strip()
+        comdata = json.loads(clean_json)
+        company_details = comdata.get("company_details", {})
         return {
-            "CEO": info.get("ceoCompName", info.get("CEO", "Information Not Available")),
-            "founded": info.get("startDate", "Information Not Available"),
-            "industry": info.get("industry", "Information Not Available"),
-            "sector": info.get("sector", "Information Not Available")
+            "CEO": company_details.get("CEO", "N/A"),
+            "founded": company_details.get("founded", "N/A"),
+            "industry": company_details.get("industry", "N/A"),
+            "sector": company_details.get("sector", "N/A")
         }
     except:
-        return {
-            "CEO": "Information Not Available",
-            "founded": "Information Not Available", 
-            "industry": "Information Not Available",
-            "sector": "Information Not Available"
-        }
+        return {"CEO": "N/A", "founded": "N/A", "industry": "N/A", "sector": "N/A"}
 
 # --- 3. AGENT NODES ---
 def ticker_node(state: AgentState):
@@ -303,7 +413,7 @@ def ticker_node(state: AgentState):
 
 
 def financials_agent(state: AgentState):
-    return {"financial_data": fetch_fundamentals(state['ticker'])}
+    return {"financial_data": fetch_fundamentals(state['company_name'],state['ticker'])}
 
 
 def market_data_agent(state: AgentState):
@@ -311,11 +421,11 @@ def market_data_agent(state: AgentState):
 
 
 def news_agent(state: AgentState):
-    news_and_details = get_company_news(state['company_name'], state['ticker'])
+    news_and_details = get_company_news(state['ticker'])
     return {"news_data": news_and_details.get("News", {})}
 
 def Company_details_agent(state: AgentState):
-    return {"company_details": get_company_details(state['ticker'])}
+    return {"company_details": get_company_details(state["company_name"],state['ticker'])}
 # --- MASTER ANALYST NODE  COMBINES ALL DATA  FOR FINAL REPORT---
 def analyst_node(state: AgentState):
     print(f"--- [Analyst] Analyzing data for {state['company_name']} ---")
@@ -418,13 +528,15 @@ workflow.add_node("ticker_resolver", ticker_node)
 workflow.add_node("financials_agent", financials_agent)
 workflow.add_node("market_data_agent", market_data_agent)
 workflow.add_node("news_agent", news_agent)
+workflow.add_node("company_details_agent", Company_details_agent)
 workflow.add_node("master_analyst", analyst_node)
 
 workflow.set_entry_point("ticker_resolver")
 workflow.add_edge("ticker_resolver", "financials_agent")
 workflow.add_edge("financials_agent", "market_data_agent")
 workflow.add_edge("market_data_agent", "news_agent")
-workflow.add_edge("news_agent", "master_analyst")
+workflow.add_edge("news_agent", "company_details_agent")
+workflow.add_edge("company_details_agent", "master_analyst")
 workflow.add_edge("master_analyst", END)
 
 app = workflow.compile()

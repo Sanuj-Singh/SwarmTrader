@@ -272,11 +272,9 @@ def get_company_news(company_name: str, ticker: str):
                 "News":news_output,
                 
                     }
-        except Exception as e:
+        except Exception e:
             print(f"Error fetching news: {e}")
-            return "new Error"
-
-
+            return {{f"new Error {e}"}}
 #function to get company details like CEO founded industry sector
 def get_company_details(ticker: str):
     print(f"--- [Company Details] Fetching details for {ticker} ---")

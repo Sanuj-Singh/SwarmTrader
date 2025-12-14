@@ -37,8 +37,3 @@ The application is built on **LangGraph**, creating a workflow where state is pa
     * **Google Custom Search JSON API** enabled
     * **Search Engine ID (CSE ID)**
 
-### 1. Clone the Repository
-```bash
-git clone [https://github.com/yourusername/swarmtrader.git](https://github.com/yourusername/swarmtrader.git)
-cd swarmtrader
-```

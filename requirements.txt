@@ -1,0 +1,15 @@
+streamlit
+yahooquery
+yfinance
+pandas
+numpy
+plotly
+langchain
+langchain-core
+langchain-community
+langchain-google-genai
+langchain-google-community
+langgraph
+google-api-python-client
+python-dotenv
+requests
